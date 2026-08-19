@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "title": "Dummy baseline",
+  "hypothesis": "A deliberately imperfect prediction vector should produce a valid 0.75 result.",
+  "parent_experiment_id": null,
+  "git_commit": "__GIT_COMMIT__",
+  "command": ["python3", "train.py", "--predictions", "0,1,0,0", "--reported-score", "0.75"],
+  "cwd": ".",
+  "env": {},
+  "secret_refs": [],
+  "protocol_id": "public-oof-v1",
+  "expected_artifacts": [
+    {"role": "predictions", "glob": "outputs/predictions.json", "required": true},
+    {"role": "reported_metrics", "glob": "outputs/reported_metrics.json", "required": true},
+    {"role": "checkpoint", "glob": "outputs/checkpoint.bin", "required": false}
+  ],
+  "resource_claim": {"gpu_ids": [], "cpu_cores": 1, "memory_gib": 1},
+  "metadata": {"example": true}
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="{{ html_language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}VeriLab{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='verilab.css') }}">
+  <script defer src="{{ url_for('static', path='vendor/htmx.min.js') }}"></script>
+  <script defer src="{{ url_for('static', path='vendor/chart-lite.js') }}"></script>
+  <script defer src="{{ url_for('static', path='verilab.js') }}"></script>
+</head>
+<body data-language="{{ language }}">
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">V</span> VeriLab</a>
+    <nav aria-label="{{ tr('nav.primary_aria') }}">
+      <a href="/">{{ tr('nav.dashboard') }}</a>
+      <a href="/audit">{{ tr('nav.audit') }}</a>
+      <a href="/api/audit/verify">{{ tr('nav.verify_chain') }}</a>
+    </nav>
+    <div class="topbar-actions">
+      <span class="trust-pill"><i></i> {{ tr('controller.local') }}</span>
+      {% if language == 'zh' %}
+        <a class="language-switch" href="/language/en?next={{ request.url.path }}" aria-label="{{ tr('language.switch_to_en_aria') }}">{{ tr('language.switch_to_en') }}</a>
+      {% else %}
+        <a class="language-switch" href="/language/zh?next={{ request.url.path }}" aria-label="{{ tr('language.switch_to_zh_aria') }}">{{ tr('language.switch_to_zh') }}</a>
+      {% endif %}
+    </div>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer>{{ tr('footer.trust') }}</footer>
+</body>
+</html>

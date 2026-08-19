@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "verilab"
+version = "0.1.0"
+description = "A verifiable experiment runner, independent grader, reviewer, and audit leaderboard"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "VeriLab contributors"}]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "jinja2>=3.1,<4",
+  "pydantic>=2.9,<3",
+  "uvicorn>=0.32,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27,<1",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+verilab = "verilab.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/verilab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

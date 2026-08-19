@@ -1,0 +1,51 @@
+# Local experiment workspaces. Keep only the boundary documentation.
+/results/*
+!/results/README.md
+
+# VeriLab runtime state and credentials.
+/.verilab/
+/state/
+/verilab-state/
+*.sqlite3
+*.sqlite3-*
+capability.token
+*.pid
+*.log
+
+# Experiment data and model artifacts must never enter the core repository.
+*.ckpt
+*.mha
+*.mhd
+*.nii
+*.nii.gz
+*.npy
+*.npz
+*.onnx
+*.pt
+*.pth
+*.raw
+*.tar
+*.tar.gz
+*.zip
+
+# Python environments, caches, coverage, and build output.
+/.venv/
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.ruff_cache/
+.coverage
+htmlcov/
+/dist/
+/build/
+*.egg-info/
+
+# Local editor, operating-system, and secret files.
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.key
+*.pem

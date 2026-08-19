@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ experiment.title }} · VeriLab{% endblock %}
+{% block content %}
+<section class="detail-head">
+  <div><a class="back" href="/">{{ tr('experiment.back_dashboard') }}</a><p class="eyebrow">{{ tr('experiment.eyebrow', id=experiment.id) }}</p><h1>{{ experiment.title }}</h1><p class="lede">{{ experiment.hypothesis }}</p></div>
+  <div><span class="status large {{ experiment.status|lower }}">{{ label('status', experiment.status) }}</span>{% if experiment.status in ['QUEUED','RUNNING'] %}<button class="danger detail-action" data-api-action="/api/runs/{{ experiment.run.id }}/cancel">{{ tr('experiment.cancel_run') }}</button>{% endif %}{% if experiment.reviews %}<a class="button secondary" href="/api/experiments/{{ experiment.id }}/bundle">{{ tr('experiment.download_bundle') }}</a>{% endif %}</div>
+</section>
+
+<section class="timeline" aria-label="{{ tr('experiment.pipeline_aria') }}">
+  {% set states = ['proposal','frozen spec','run','grader','reviewer','leaderboard'] %}
+  {% for state in states %}<div class="{% if loop.index <= experiment.pipeline_stage %}done{% endif %}"><i>{{ loop.index }}</i><span>{{ label('pipeline', state) }}</span></div>{% endfor %}
+</section>
+
+<section class="grid detail-grid">
+  <article class="panel">
+    <div class="panel-head"><h2>{{ tr('experiment.frozen_execution') }}</h2><code>{{ experiment.spec_hash[:12] }}…</code></div>
+    <dl class="facts">
+      <dt>{{ tr('experiment.commit') }}</dt><dd><code>{{ experiment.git_commit }}</code></dd>
+      <dt>{{ tr('experiment.command') }}</dt><dd><code>{{ experiment.spec.command|join(' ') }}</code></dd>
+      <dt>{{ tr('experiment.working_dir') }}</dt><dd>{{ experiment.spec.cwd }}</dd>
+      <dt>{{ tr('experiment.environment') }}</dt><dd><code>{{ experiment.spec.env|tojson }}</code></dd>
+      <dt>{{ tr('experiment.resources') }}</dt><dd><code>{{ experiment.spec.resource_claim|tojson }}</code></dd>
+      <dt>{{ tr('experiment.protocol') }}</dt><dd>{{ experiment.protocol_id }}</dd>
+      <dt>{{ tr('experiment.run_ticket') }}</dt><dd><code>{{ experiment.run.ticket_hash }}</code></dd>
+      <dt>{{ tr('experiment.pid_ticks') }}</dt><dd>{{ experiment.run.pid or '—' }} / {{ experiment.run.process_start_ticks or '—' }}</dd>
+      <dt>{{ tr('experiment.heartbeat') }}</dt><dd>{{ experiment.run.heartbeat_at or '—' }}</dd>
+      <dt>{{ tr('experiment.log_bytes') }}</dt><dd>{{ experiment.run.stdout_size }}</dd>
+      <dt>{{ tr('experiment.cpu_ticks') }}</dt><dd>{{ experiment.run.cpu_ticks or '—' }}</dd>
+      <dt>{{ tr('experiment.gpu_sample') }}</dt><dd><code>{{ experiment.run.gpu_sample_json or '[]' }}</code></dd>
+    </dl>
+  </article>
+  <article class="panel">
+    <div class="panel-head"><h2>{{ tr('experiment.metric_provenance') }}</h2></div>
+    <table><thead><tr><th>{{ tr('experiment.metric') }}</th><th>{{ tr('experiment.value') }}</th><th>{{ tr('experiment.authority') }}</th></tr></thead><tbody>
+      {% for metric in experiment.metrics %}<tr><td title="{{ metric.name }}">{{ label('metric', metric.name) }}</td><td class="score">{{ "%.8g"|format(metric.value) }}</td><td><span class="source {{ metric.source }}">{{ label('source', metric.source) }}</span></td></tr>{% else %}<tr><td colspan="3" class="empty">{{ tr('experiment.not_graded') }}</td></tr>{% endfor %}
+    </tbody></table>
+  </article>
+</section>
+
+{% if experiment.parent_experiment_id %}
+<section class="panel">
+  <div class="panel-head"><h2>{{ tr('experiment.parent_diff') }}</h2><a href="/experiments/{{ experiment.parent_experiment_id }}">{{ tr('experiment.open_parent') }}</a></div>
+  <div class="table-wrap"><table><thead><tr><th>{{ tr('experiment.field') }}</th><th>{{ tr('experiment.parent') }}</th><th>{{ tr('experiment.current') }}</th></tr></thead><tbody>
+  {% for key, change in experiment.parent_diff.items() %}<tr><td><code>{{ key }}</code></td><td><code>{{ change.parent|tojson }}</code></td><td><code>{{ change.current|tojson }}</code></td></tr>{% else %}<tr><td colspan="3" class="empty">{{ tr('experiment.no_spec_changes') }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>{{ tr('experiment.artifact_manifest') }}</h2><span>{{ tr('experiment.sealed_count', count=experiment.artifacts|length) }}</span></div>
+  <div class="table-wrap"><table><thead><tr><th>{{ tr('experiment.role') }}</th><th>{{ tr('experiment.path') }}</th><th>{{ tr('experiment.size') }}</th><th>SHA256</th><th>{{ tr('experiment.health') }}</th></tr></thead><tbody>
+  {% for artifact in experiment.artifacts %}<tr><td title="{{ artifact.role }}">{{ label('role', artifact.role) }}</td><td><code>{{ artifact.relative_path }}</code></td><td>{{ artifact.size_bytes }}</td><td><code>{{ artifact.sha256[:16] }}…</code></td><td><span class="status {{ artifact.health }}">{{ label('status', artifact.health) }}</span></td></tr>{% else %}<tr><td colspan="5" class="empty">{{ tr('experiment.artifacts_not_sealed') }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="grid detail-grid">
+  <article class="panel">
+    <div class="panel-head"><h2>{{ tr('experiment.independent_reviews') }}</h2><span class="role-dot">{{ tr('experiment.fresh_readonly') }}</span></div>
+    {% for review in experiment.reviews %}<div class="review-card"><span class="status {{ review.status|lower }}">{{ label('status', review.status) }}</span><b>{{ tr('experiment.attempt', number=review.attempt) }}</b><code>{{ review.bundle_sha256[:16] }}…</code>{% if review.output %}<p>{{ review.output.summary }}</p><ul class="check-list">{% for check in review.output.checks %}<li><span class="status {{ check.status }}">{{ label('status', check.status) }}</span><b title="{{ check.name }}">{{ label('check', check.name) }}</b><small>{{ check.evidence_refs|join(', ') }}</small><p>{{ check.note }}</p></li>{% endfor %}</ul>{% endif %}{% if review.error %}<p>{{ review.error }}</p>{% endif %}</div>{% else %}<p class="empty">{{ tr('experiment.reviewer_not_run') }}</p>{% endfor %}
+  </article>
+  <article class="panel">
+    <div class="panel-head"><h2>{{ tr('experiment.hash_events') }}</h2><span>{{ tr('experiment.event_count', count=experiment.events|length) }}</span></div>
+    <ol class="event-list">{% for event in experiment.events %}<li><i>{{ event.seq }}</i><div><b title="{{ event.event_type }}">{{ label('event', event.event_type) }}</b><small>{{ event.created_at }}</small><code>{{ event.event_hash[:18] }}…</code></div></li>{% else %}<li class="empty">{{ tr('experiment.no_events') }}</li>{% endfor %}</ol>
+  </article>
+</section>
+{% endblock %}

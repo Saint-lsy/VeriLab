@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('page.audit_title') }}{% endblock %}
+{% block content %}
+<section class="detail-head"><div><p class="eyebrow">{{ tr('audit.fail_closed') }}</p><h1>{{ tr('audit.title') }}</h1><p class="lede">{{ tr('audit.lede') }}</p></div><a class="button" href="/api/audit/verify">{{ tr('audit.run_integrity') }}</a></section>
+<section class="panel">
+  <div class="table-wrap"><table><thead><tr><th>{{ tr('audit.experiment') }}</th><th>{{ tr('audit.status') }}</th><th>{{ tr('audit.evidence') }}</th><th>{{ tr('audit.commit') }}</th><th>{{ tr('audit.updated') }}</th><th>{{ tr('audit.actions') }}</th></tr></thead><tbody>
+  {% for experiment in experiments %}<tr><td><a href="/experiments/{{ experiment.id }}">{{ experiment.title }}</a><small>{{ experiment.id }}</small></td><td><span class="status {{ experiment.status|lower }}">{{ label('status', experiment.status) }}</span></td><td><span class="status {{ experiment.evidence_health }}">{{ label('status', experiment.evidence_health) }}</span></td><td><code>{{ experiment.git_commit[:12] }}</code></td><td>{{ experiment.updated_at }}</td><td class="actions">{% if experiment.status in ['REVIEW_BLOCKED','NEEDS_HUMAN'] and experiment.reviews %}<button data-api-action="/api/reviews/{{ experiment.reviews[-1].id }}/retry">{{ tr('audit.retry_review') }}</button>{% endif %}<button class="secondary" data-note-experiment="{{ experiment.id }}">{{ tr('audit.add_note') }}</button><button class="danger" data-withdraw-experiment="{{ experiment.id }}">{{ tr('audit.withdraw') }}</button></td></tr>{% else %}<tr><td colspan="6" class="empty">{{ tr('audit.clear') }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "project_id": "verilab-dummy",
+  "protocol_id": "public-oof-v1",
+  "grader_command": [
+    "python3",
+    "{project_root}/trusted_grader.py",
+    "--manifest",
+    "{manifest}",
+    "--output",
+    "{output}"
+  ],
+  "grader_code_paths": ["{project_root}/trusted_grader.py"],
+  "primary_metric": "accuracy",
+  "direction": "maximize",
+  "dataset": "dummy-classification-v1",
+  "split": "fixed-public-four",
+  "cohort": "dummy-four-cases",
+  "preprocessing": "identity",
+  "evaluator": "exact-match-v1",
+  "required_artifact_roles": ["predictions"],
+  "reported_metric_role": "reported_metrics",
+  "metric_tolerance": 1e-12,
+  "small_artifact_limit_mib": 64,
+  "reviewer_timeout_seconds": 900,
+  "run_timeout_seconds": 30,
+  "secret_names": [],
+  "metadata": {"description": "VeriLab deterministic dummy policy"}
+}

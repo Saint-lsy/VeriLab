@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ tr('page.dashboard_title') }}{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">{{ tr('dashboard.control_eyebrow') }}</p>
+    <h1>{{ tr('dashboard.hero_title') }}</h1>
+    <p class="lede">{{ tr('dashboard.hero_lede') }}</p>
+  </div>
+  <div class="anchor-card">
+    <span>{{ tr('dashboard.current_anchor') }}</span>
+    {% if leaderboard %}
+      <strong>{{ "%.6f"|format(leaderboard[0].score) }}</strong>
+      <small>{{ leaderboard[0].title }}</small>
+    {% else %}
+      <strong>—</strong><small>{{ tr('dashboard.no_verified_anchor') }}</small>
+    {% endif %}
+  </div>
+</section>
+
+<section class="stats" aria-label="{{ tr('dashboard.pipeline_aria') }}">
+  {% for key in ['RUNNING', 'QUEUED', 'GRADING', 'REVIEW_PENDING', 'FAILED'] %}
+  <article><span>{{ label('status', key) }}</span><strong>{{ counts.get(key, 0) }}</strong></article>
+  {% endfor %}
+</section>
+
+<section class="grid main-grid">
+  <article class="panel leaderboard-panel">
+    <div class="panel-head">
+      <div><p class="eyebrow">{{ tr('dashboard.verified_only') }}</p><h2>{{ tr('dashboard.leaderboard') }}</h2></div>
+      <code title="{{ tr('dashboard.comparison_key') }}">{{ comparison_key[:12] }}…</code>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="active" data-tab="verified">{{ tr('dashboard.tab_verified') }}</button>
+      <button data-tab="all">{{ tr('dashboard.tab_all') }}</button>
+      <button data-tab="rejected">{{ tr('dashboard.tab_rejected') }}</button>
+      <button data-tab="untracked">{{ tr('dashboard.tab_untracked') }}</button>
+    </div>
+    <div data-tab-panel="verified" class="table-wrap">
+      <table>
+        <thead><tr><th>{{ tr('dashboard.rank') }}</th><th>{{ tr('dashboard.experiment') }}</th><th>{{ tr('dashboard.verified_score') }}</th><th>{{ tr('dashboard.parent_delta') }}</th><th>{{ tr('dashboard.commit') }}</th><th>{{ tr('dashboard.duration') }}</th><th>{{ tr('dashboard.reviewer') }}</th><th>{{ tr('dashboard.evidence') }}</th></tr></thead>
+        <tbody>
+        {% for entry in leaderboard %}
+          <tr>
+            <td class="rank">#{{ entry.rank }}</td>
+            <td><a href="/experiments/{{ entry.experiment_id }}">{{ entry.title }}</a><small>{{ entry.protocol_id }}</small></td>
+            <td class="score">{{ "%.6f"|format(entry.score) }}</td>
+            <td>{% if entry.parent_delta is not none %}{{ "%+.6f"|format(entry.parent_delta) }}{% else %}—{% endif %}</td>
+            <td><code>{{ entry.git_commit[:9] }}</code></td>
+            <td>{% if entry.duration_seconds is not none %}{{ "%.2f"|format(entry.duration_seconds) }} {{ tr('dashboard.seconds') }}{% else %}—{% endif %}</td>
+            <td><span class="status {{ entry.reviewer_status|lower }}">{{ label('status', entry.reviewer_status) }}</span></td>
+            <td><span class="status {{ entry.evidence_health|lower }}">{{ label('status', entry.evidence_health) }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">{{ tr('dashboard.no_passed_review') }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div data-tab-panel="all" hidden class="run-list">
+      {% for experiment in experiments %}<a href="/experiments/{{ experiment.id }}"><span>{{ experiment.title }}</span><b class="status {{ experiment.status|lower }}">{{ label('status', experiment.status) }}</b></a>{% else %}<p class="empty">{{ tr('dashboard.no_runs') }}</p>{% endfor %}
+    </div>
+    <div data-tab-panel="rejected" hidden class="run-list">
+      {% for experiment in experiments if experiment.status == 'REJECTED' %}<a href="/experiments/{{ experiment.id }}"><span>{{ experiment.title }}</span><b class="status rejected">{{ label('status', 'REJECTED') }}</b></a>{% else %}<p class="empty">{{ tr('dashboard.no_rejected') }}</p>{% endfor %}
+    </div>
+    <div data-tab-panel="untracked" hidden><p class="empty">{{ tr('dashboard.untracked_help') }}</p></div>
+  </article>
+
+  <aside class="panel chat-panel">
+    <div class="panel-head"><div><p class="eyebrow">{{ tr('dashboard.executor') }}</p><h2>{{ tr('dashboard.experiment_chat') }}</h2></div><span class="role-dot">{{ tr('dashboard.workspace_write') }}</span></div>
+    <div id="chat-log" class="chat-log">
+      <div class="chat system">{{ tr('dashboard.chat_help') }}</div>
+    </div>
+    <form id="chat-form" hx-post="/api/chat/messages" hx-ext="json-enc">
+      <textarea name="message" placeholder="{{ tr('dashboard.chat_placeholder') }}" required></textarea>
+      <div><small>{{ tr('dashboard.debug_untracked') }}</small><button type="submit">{{ tr('dashboard.send_executor') }}</button></div>
+    </form>
+  </aside>
+</section>
+
+<section class="panel evolution-panel">
+  <div class="panel-head"><div><p class="eyebrow">{{ tr('dashboard.primary_metric') }}</p><h2>{{ tr('dashboard.verified_evolution') }}</h2></div><span>{{ tr('dashboard.chronological') }}</span></div>
+  <canvas id="metric-chart" data-values='{{ leaderboard|sort(attribute="verified_at")|map(attribute="score")|list|tojson }}' aria-label="{{ tr('dashboard.chart_aria') }}"></canvas>
+</section>
+
+<section class="panel recent-panel">
+  <div class="panel-head"><div><p class="eyebrow">{{ tr('dashboard.canonical_projection') }}</p><h2>{{ tr('dashboard.recent_experiments') }}</h2></div><a href="/api/experiments">{{ tr('dashboard.json_api') }}</a></div>
+  <div class="cards">
+    {% for experiment in experiments[:6] %}
+    <a class="experiment-card" href="/experiments/{{ experiment.id }}">
+      <span class="status {{ experiment.status|lower }}">{{ label('status', experiment.status) }}</span>
+      <h3>{{ experiment.title }}</h3>
+      <p>{{ experiment.hypothesis }}</p>
+      <code>{{ experiment.git_commit[:12] }}</code>
+    </a>
+    {% else %}<p class="empty">{{ tr('dashboard.queue_empty') }}</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}
