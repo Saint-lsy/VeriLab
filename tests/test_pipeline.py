@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from verilab.models import ExperimentSpec
+from verilab.models import ChangeSummary, ExperimentSpec, ReviewOutput
 from verilab.security import process_start_ticks, same_process
+from verilab.service import InvalidState
 
 from .conftest import FakeReviewer, commit_all, load_policy, make_spec
 
@@ -67,6 +68,64 @@ def test_valid_low_score_is_verified_and_ranked(project: Path, service_factory) 
     assert len(board) == 1
     assert board[0]["score"] == 0.75
     assert board[0]["rank"] == 1
+    assert board[0]["change_summary"]["source"] == "independent_reviewer"
+    assert result["change_summary"]["headline"]
+    event_types = [event["event_type"] for event in result["events"]]
+    assert event_types.index("experiment.change_summary_recorded") < event_types.index(
+        "experiment.accepted"
+    )
+    assert service.audit_verify()["ok"] is True
+
+
+def test_missing_natural_language_summary_fails_closed(project: Path, service_factory) -> None:
+    class MissingSummaryReviewer:
+        def review(self, **_kwargs):
+            return ReviewOutput.model_validate(
+                {
+                    "target_bundle_sha256": "0" * 64,
+                    "verdict": "eligible",
+                    "checks": [],
+                    "summary": "A review without the required human narrative.",
+                }
+            )
+
+    service = service_factory(reviewer=MissingSummaryReviewer())
+    submitted = service.submit(make_spec(project, title="Missing narrative"))
+    service.run_next()
+    result = service.get_experiment(submitted["experiment_id"])
+    assert result["status"] == "REVIEW_BLOCKED"
+    assert result["change_summary"] is None
+    assert service.leaderboard() == []
+
+
+def test_reviewer_summary_cannot_be_replaced_by_historical_backfill(
+    project: Path, service_factory
+) -> None:
+    service = service_factory()
+    submitted = service.submit(make_spec(project, title="Historical narrative"))
+    service.run_next()
+    experiment_id = submitted["experiment_id"]
+    related = [
+        event
+        for event in service.ledger.list(after=0, limit=1000)
+        if event["entity_id"] == experiment_id
+    ]
+    reference = f"event:{related[0]['seq']}"
+    summary = ChangeSummary.model_validate(
+        {
+            "headline": "Historical result explained for human review",
+            "summary": "This appended explanation preserves the original experiment evidence.",
+            "key_changes": ["The historical result is described without changing its score."],
+            "expected_effect": "Make the experiment progression understandable to a human.",
+            "observed_effect": "The trusted score and leaderboard row remain unchanged.",
+            "evidence_refs": [reference],
+        }
+    )
+    with pytest.raises(InvalidState, match="already has a canonical change summary"):
+        service.record_historical_change_summary(experiment_id, summary)
+    result = service.get_experiment(experiment_id)
+    assert result["change_summary"]["source"] == "independent_reviewer"
+    assert service.leaderboard()[0]["score"] == 0.75
     assert service.audit_verify()["ok"] is True
 
 

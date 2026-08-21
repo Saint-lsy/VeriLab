@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}VeriLab{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='verilab.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='verilab.css') }}?v=20260819-narrative1">
   <script defer src="{{ url_for('static', path='vendor/htmx.min.js') }}"></script>
   <script defer src="{{ url_for('static', path='vendor/chart-lite.js') }}"></script>
-  <script defer src="{{ url_for('static', path='verilab.js') }}"></script>
+  <script defer src="{{ url_for('static', path='verilab.js') }}?v=20260819-narrative1"></script>
 </head>
 <body data-language="{{ language }}">
   <header class="topbar">

@@ -37,12 +37,45 @@
   </article>
 </section>
 
+<section class="panel narrative-panel">
+  <div class="panel-head">
+    <div><p class="eyebrow">{{ tr('dashboard.change_summary') }}</p><h2>{{ tr('experiment.change_summary') }}</h2></div>
+    {% if experiment.change_summary %}
+      <span>
+        {{ tr('experiment.source_' ~ experiment.change_summary.source) }} ·
+        event:{{ experiment.change_summary.event_seq }}
+      </span>
+    {% endif %}
+  </div>
+  {% if experiment.change_summary %}
+    <h3>{{ experiment.change_summary.headline }}</h3>
+    <p class="narrative-summary">{{ experiment.change_summary.summary }}</p>
+    <div class="narrative-grid">
+      <div>
+        <h4>{{ tr('experiment.key_changes') }}</h4>
+        <ul>{% for change in experiment.change_summary.key_changes %}<li>{{ change }}</li>{% endfor %}</ul>
+      </div>
+      <div>
+        <h4>{{ tr('experiment.expected_effect') }}</h4>
+        <p>{{ experiment.change_summary.expected_effect }}</p>
+        <h4>{{ tr('experiment.observed_effect') }}</h4>
+        <p>{{ experiment.change_summary.observed_effect }}</p>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty">{{ tr('experiment.summary_pending') }}</p>
+  {% endif %}
+</section>
+
 {% if experiment.parent_experiment_id %}
 <section class="panel">
-  <div class="panel-head"><h2>{{ tr('experiment.parent_diff') }}</h2><a href="/experiments/{{ experiment.parent_experiment_id }}">{{ tr('experiment.open_parent') }}</a></div>
-  <div class="table-wrap"><table><thead><tr><th>{{ tr('experiment.field') }}</th><th>{{ tr('experiment.parent') }}</th><th>{{ tr('experiment.current') }}</th></tr></thead><tbody>
-  {% for key, change in experiment.parent_diff.items() %}<tr><td><code>{{ key }}</code></td><td><code>{{ change.parent|tojson }}</code></td><td><code>{{ change.current|tojson }}</code></td></tr>{% else %}<tr><td colspan="3" class="empty">{{ tr('experiment.no_spec_changes') }}</td></tr>{% endfor %}
-  </tbody></table></div>
+  <details class="technical-evidence">
+    <summary>{{ tr('experiment.technical_evidence') }}</summary>
+    <div class="panel-head"><h2>{{ tr('experiment.parent_diff') }}</h2><a href="/experiments/{{ experiment.parent_experiment_id }}">{{ tr('experiment.open_parent') }}</a></div>
+    <div class="table-wrap"><table><thead><tr><th>{{ tr('experiment.field') }}</th><th>{{ tr('experiment.parent') }}</th><th>{{ tr('experiment.current') }}</th></tr></thead><tbody>
+    {% for key, change in experiment.parent_diff.items() %}<tr><td><code>{{ key }}</code></td><td><code>{{ change.parent|tojson }}</code></td><td><code>{{ change.current|tojson }}</code></td></tr>{% else %}<tr><td colspan="3" class="empty">{{ tr('experiment.no_spec_changes') }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>
 </section>
 {% endif %}
 

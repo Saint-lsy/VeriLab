@@ -126,6 +126,7 @@ def create_app(
         experiments = service.list_experiments()
         counts = Counter(item["status"] for item in experiments)
         leaderboard = service.leaderboard(service.policy.comparison_key)
+        lineage = service.experiment_lineage(service.policy.comparison_key)
         return templates.TemplateResponse(
             request,
             "dashboard.html",
@@ -134,6 +135,7 @@ def create_app(
                 experiments=experiments,
                 counts=counts,
                 leaderboard=leaderboard,
+                lineage=lineage,
                 comparison_key=service.policy.comparison_key,
             ),
         )
@@ -209,6 +211,10 @@ def create_app(
     @app.get("/api/leaderboard")
     async def leaderboard(comparison_key: str | None = None):
         return {"entries": service.leaderboard(comparison_key)}
+
+    @app.get("/api/lineage")
+    async def lineage(comparison_key: str | None = None):
+        return service.experiment_lineage(comparison_key)
 
     @app.post("/api/runs/{run_id}/cancel")
     async def cancel(run_id: str):

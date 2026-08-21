@@ -8,6 +8,7 @@ def test_target_bundle_digest_is_an_allowed_evidence_reference(tmp_path) -> None
         experiment={},
         run={},
         policy={},
+        change_context={},
         artifacts=[{"sha256": "a" * 64}],
         metrics=[],
         events=[{"seq": 7}],

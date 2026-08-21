@@ -229,6 +229,35 @@ class ReviewCheck(BaseModel):
     note: str
 
 
+class ChangeSummary(BaseModel):
+    """Human-facing explanation of what changed and what the result means."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str = Field(min_length=1, max_length=240)
+    summary: str = Field(min_length=1, max_length=2000)
+    key_changes: list[str] = Field(min_length=1, max_length=8)
+    expected_effect: str = Field(min_length=1, max_length=1000)
+    observed_effect: str = Field(min_length=1, max_length=1000)
+    evidence_refs: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("headline", "summary", "expected_effect", "observed_effect")
+    @classmethod
+    def narrative_text_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("narrative text must not be blank")
+        return value
+
+    @field_validator("key_changes")
+    @classmethod
+    def key_changes_must_not_be_blank(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        if any(not value for value in cleaned):
+            raise ValueError("key changes must not contain blank items")
+        return cleaned
+
+
 class ReviewOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -236,6 +265,7 @@ class ReviewOutput(BaseModel):
     verdict: Literal["eligible", "ineligible", "needs_human"]
     checks: list[ReviewCheck]
     summary: str
+    change_summary: ChangeSummary
 
 
 REQUIRED_REVIEW_CHECKS = {
@@ -268,6 +298,8 @@ def validate_review_semantics(
             return False, f"review check {check.name} is {check.status}"
         if not check.evidence_refs or any(ref not in allowed for ref in check.evidence_refs):
             return False, f"review check {check.name} has invalid evidence references"
+    if any(ref not in allowed for ref in review.change_summary.evidence_refs):
+        return False, "change summary has invalid evidence references"
     if review.verdict != "eligible":
         return False, f"review verdict is {review.verdict}"
     return True, "eligible"

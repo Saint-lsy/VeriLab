@@ -26,6 +26,7 @@ from .ledger import EventLedger, utc_now
 from .models import (
     ALLOWED_TRANSITIONS,
     REQUIRED_REVIEW_CHECKS,
+    ChangeSummary,
     ExperimentSpec,
     ExperimentStatus,
     ProjectPolicy,
@@ -38,6 +39,7 @@ from .repository import (
     policy_public_view,
     validate_submission_repository,
 )
+from .repository import git as repository_git
 from .runner import RunExecutor
 from .security import (
     redacted_environment,
@@ -673,6 +675,97 @@ class VeriLabService:
                 okay = False
         return okay, results
 
+    def _review_change_context(
+        self,
+        experiment: dict[str, Any],
+        policy: ProjectPolicy,
+        metrics: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        current_spec = self._public_spec(experiment["spec_json"], policy)
+        current_metric = next(
+            (
+                row
+                for row in metrics
+                if row["name"] == policy.primary_metric and row["source"] == "computed"
+            ),
+            None,
+        )
+        context: dict[str, Any] = {
+            "schema_version": 1,
+            "primary_metric": policy.primary_metric,
+            "direction": policy.direction,
+            "current": {
+                "experiment_id": experiment["id"],
+                "title": experiment["title"],
+                "hypothesis": experiment["hypothesis"],
+                "git_commit": experiment["git_commit"],
+                "computed_score": current_metric["value"] if current_metric else None,
+            },
+            "parent": None,
+            "score_delta": None,
+            "spec_changes": [],
+            "git_change_count": 0,
+            "git_changes": [],
+        }
+        parent_id = experiment["parent_experiment_id"]
+        if not parent_id:
+            return context
+
+        parent = self._experiment_row(parent_id)
+        parent_policy = self._policy_for_experiment(parent)
+        parent_spec = self._public_spec(parent["spec_json"], parent_policy)
+        parent_metrics = self._metric_rows(parent_id)
+        parent_metric = next(
+            (
+                row
+                for source in ("verified", "computed")
+                for row in parent_metrics
+                if row["name"] == policy.primary_metric and row["source"] == source
+            ),
+            None,
+        )
+        excluded_fields = {
+            "git_commit",
+            "parent_experiment_id",
+            "schema_version",
+            "secret_refs",
+            "title",
+        }
+        spec_changes = [
+            {
+                "field": field,
+                "parent": parent_spec.get(field),
+                "current": current_spec.get(field),
+            }
+            for field in sorted(set(parent_spec) | set(current_spec))
+            if field not in excluded_fields and parent_spec.get(field) != current_spec.get(field)
+        ]
+        git_change_count, git_changes = self._git_change_summary(
+            parent["git_commit"], experiment["git_commit"]
+        )
+        parent_score = parent_metric["value"] if parent_metric else None
+        current_score = current_metric["value"] if current_metric else None
+        context.update(
+            {
+                "parent": {
+                    "experiment_id": parent["id"],
+                    "title": parent["title"],
+                    "hypothesis": parent["hypothesis"],
+                    "git_commit": parent["git_commit"],
+                    "trusted_score": parent_score,
+                },
+                "score_delta": (
+                    current_score - parent_score
+                    if current_score is not None and parent_score is not None
+                    else None
+                ),
+                "spec_changes": spec_changes,
+                "git_change_count": git_change_count,
+                "git_changes": git_changes,
+            }
+        )
+        return context
+
     def _review(self, experiment_id: str) -> None:
         okay, verification = self._pre_review_verify(experiment_id)
         if not okay:
@@ -712,6 +805,7 @@ class VeriLabService:
             experiment=public_experiment,
             run=public_run,
             policy=policy_public_view(policy),
+            change_context=self._review_change_context(experiment, policy, metrics),
             artifacts=artifacts,
             metrics=metrics,
             events=events,
@@ -858,7 +952,7 @@ class VeriLabService:
                 payload={"summary": output.summary},
             )
         else:
-            self._accept(experiment_id, review_id)
+            self._accept(experiment_id, review_id, output.change_summary)
 
     @staticmethod
     def _review_structure_error(
@@ -879,9 +973,13 @@ class VeriLabService:
                 return f"check {check.name} has no evidence reference"
             if any(reference not in allowed for reference in check.evidence_refs):
                 return f"check {check.name} has an invalid evidence reference"
+        if any(reference not in allowed for reference in output.change_summary.evidence_refs):
+            return "change summary has an invalid evidence reference"
         return None
 
-    def _accept(self, experiment_id: str, review_id: str) -> None:
+    def _accept(
+        self, experiment_id: str, review_id: str, change_summary: ChangeSummary
+    ) -> None:
         experiment = self._experiment_row(experiment_id)
         policy = self._policy_for_experiment(experiment)
         run = self._run_for_experiment(experiment_id)
@@ -920,6 +1018,22 @@ class VeriLabService:
                         now,
                     ),
                 )
+            narrative = change_summary.model_dump(mode="json")
+            narrative_sha256 = canonical_sha256(narrative)
+            self.ledger.append(
+                entity_type="experiment",
+                entity_id=experiment_id,
+                event_type="experiment.change_summary_recorded",
+                payload={
+                    "schema_version": 1,
+                    "source": "independent_reviewer",
+                    "review_id": review_id,
+                    "change_summary_sha256": narrative_sha256,
+                    "change_summary": narrative,
+                },
+                actor="reviewer",
+                connection=connection,
+            )
             connection.execute(
                 """
                 INSERT INTO leaderboard_entries(
@@ -952,6 +1066,7 @@ class VeriLabService:
                     "comparison_key": experiment["comparison_key"],
                     "metric": policy.primary_metric,
                     "score": primary["value"],
+                    "change_summary_sha256": narrative_sha256,
                 },
                 actor="controller",
                 connection=connection,
@@ -1020,6 +1135,59 @@ class VeriLabService:
                 actor="user",
                 connection=connection,
             )
+
+    def record_historical_change_summary(
+        self, experiment_id: str, change_summary: ChangeSummary
+    ) -> dict[str, Any]:
+        experiment = self._experiment_row(experiment_id)
+        if ExperimentStatus(experiment["status"]) != ExperimentStatus.ACCEPTED:
+            raise InvalidState("historical summaries may only be attached to accepted experiments")
+        if experiment_id in self._change_summary_records():
+            raise InvalidState("experiment already has a canonical change summary")
+        related_events = [
+            event
+            for event in self.ledger.list(after=0, limit=1_000_000)
+            if event["entity_id"] == experiment_id
+            or event["payload"].get("experiment_id") == experiment_id
+        ]
+        allowed_event_refs = {f"event:{event['seq']}" for event in related_events}
+        if any(reference not in allowed_event_refs for reference in change_summary.evidence_refs):
+            raise ServiceError("historical change summary has unrelated evidence references")
+        narrative = change_summary.model_dump(mode="json")
+        payload = {
+            "schema_version": 1,
+            "source": "historical_offline_backfill",
+            "review_id": None,
+            "change_summary_sha256": canonical_sha256(narrative),
+            "change_summary": narrative,
+        }
+        event = self.ledger.append(
+            entity_type="experiment",
+            entity_id=experiment_id,
+            event_type="experiment.change_summary_recorded",
+            payload=payload,
+            actor="controller",
+        )
+        return {"experiment_id": experiment_id, "event_seq": event["seq"], **payload}
+
+    def _change_summary_records(self) -> dict[str, dict[str, Any]]:
+        records: dict[str, dict[str, Any]] = {}
+        for event in self.ledger.list(after=0, limit=1_000_000):
+            if event["event_type"] != "experiment.change_summary_recorded":
+                continue
+            payload = event["payload"]
+            try:
+                narrative = ChangeSummary.model_validate(payload["change_summary"])
+            except (KeyError, ValidationError):
+                continue
+            records[event["entity_id"]] = {
+                **narrative.model_dump(mode="json"),
+                "source": payload.get("source"),
+                "review_id": payload.get("review_id"),
+                "recorded_at": event["created_at"],
+                "event_seq": event["seq"],
+            }
+        return records
 
     def withdraw(self, experiment_id: str, reason: str) -> None:
         if not reason.strip():
@@ -1260,6 +1428,8 @@ class VeriLabService:
         sealed_artifacts: dict[str, dict[str, Any]] = {}
         artifact_health: dict[str, str] = {}
         computed_metrics: dict[tuple[str, str], float] = {}
+        narrative_hashes: dict[str, str] = {}
+        event_errors: list[str] = []
         try:
             events = self.ledger.list(after=0, limit=1_000_000)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -1271,10 +1441,28 @@ class VeriLabService:
                 statuses[event["entity_id"]] = ExperimentStatus.QUEUED
             elif event_type == "experiment.status_changed":
                 statuses[event["entity_id"]] = str(payload.get("to"))
+            elif event_type == "experiment.change_summary_recorded":
+                try:
+                    narrative = ChangeSummary.model_validate(payload["change_summary"])
+                    actual_hash = canonical_sha256(narrative.model_dump(mode="json"))
+                    if actual_hash != payload.get("change_summary_sha256"):
+                        event_errors.append(
+                            f"change summary hash mismatch for {event['entity_id']}"
+                        )
+                    narrative_hashes[event["entity_id"]] = actual_hash
+                except (KeyError, ValidationError) as exc:
+                    event_errors.append(
+                        f"invalid change summary event for {event['entity_id']}: {exc}"
+                    )
             elif event_type == "experiment.accepted":
                 experiment_id = event["entity_id"]
                 statuses[experiment_id] = ExperimentStatus.ACCEPTED
                 accepted[experiment_id] = payload
+                narrative_hash = payload.get("change_summary_sha256")
+                if narrative_hash and narrative_hashes.get(experiment_id) != narrative_hash:
+                    event_errors.append(
+                        f"experiment {experiment_id} accepted without its recorded change summary"
+                    )
             elif event_type == "experiment.withdrawn":
                 withdrawn.add(event["entity_id"])
             elif event_type == "artifact.sealed":
@@ -1286,7 +1474,7 @@ class VeriLabService:
                 for name, value in payload.get("metrics", {}).items():
                     computed_metrics[(event["entity_id"], name)] = float(value)
 
-        errors: list[str] = []
+        errors: list[str] = list(event_errors)
         with self.db.connect() as connection:
             experiment_rows = {
                 row["id"]: dict(row) for row in connection.execute("SELECT * FROM experiments")
@@ -1398,6 +1586,7 @@ class VeriLabService:
                 for key in sorted(set(parent_spec) | set(current_spec))
                 if parent_spec.get(key) != current_spec.get(key)
             }
+        experiment["change_summary"] = self._change_summary_records().get(experiment_id)
         stage_by_status = {
             ExperimentStatus.DRAFT: 1,
             ExperimentStatus.QUEUED: 2,
@@ -1442,6 +1631,161 @@ class VeriLabService:
             row.pop("spec_json", None)
         return rows
 
+    def experiment_lineage(self, comparison_key: str | None = None) -> dict[str, Any]:
+        key = comparison_key or self.policy.comparison_key
+        with self.db.connect() as connection:
+            experiments = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT * FROM experiments
+                    WHERE comparison_key = ?
+                    ORDER BY created_at, id
+                    """,
+                    (key,),
+                )
+            ]
+            metric_rows = [
+                dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT experiment_id, name, value, source
+                    FROM metrics
+                    WHERE comparison_key = ?
+                    """,
+                    (key,),
+                )
+            ]
+        if not experiments:
+            return {"comparison_key": key, "primary_metric": None, "nodes": []}
+
+        policy = self._policy_for_experiment(experiments[0])
+        source_priority = {"reported": 0, "computed": 1, "verified": 2}
+        scores: dict[str, dict[str, Any]] = {}
+        for metric in metric_rows:
+            if metric["name"] != policy.primary_metric:
+                continue
+            current = scores.get(metric["experiment_id"])
+            if current is None or source_priority.get(metric["source"], -1) > source_priority.get(
+                current["source"], -1
+            ):
+                scores[metric["experiment_id"]] = metric
+
+        specs = {
+            row["id"]: self._public_spec(row["spec_json"], self._policy_for_experiment(row))
+            for row in experiments
+        }
+        by_id = {row["id"]: row for row in experiments}
+        change_summaries = self._change_summary_records()
+        git_cache: dict[tuple[str, str], tuple[int, list[dict[str, str]]]] = {}
+        excluded_fields = {
+            "git_commit",
+            "parent_experiment_id",
+            "schema_version",
+            "secret_refs",
+            "title",
+        }
+        nodes: list[dict[str, Any]] = []
+        for experiment in experiments:
+            experiment_id = experiment["id"]
+            parent_id = experiment["parent_experiment_id"]
+            score = scores.get(experiment_id)
+            parent_score = scores.get(parent_id) if parent_id else None
+            spec_changes: list[dict[str, Any]] = []
+            git_change_count = 0
+            git_changes: list[dict[str, str]] = []
+            parent_title = None
+            if parent_id and parent_id in by_id:
+                parent = by_id[parent_id]
+                parent_title = parent["title"]
+                parent_spec = specs[parent_id]
+                current_spec = specs[experiment_id]
+                spec_changes = [
+                    {
+                        "field": field,
+                        "parent": parent_spec.get(field),
+                        "current": current_spec.get(field),
+                    }
+                    for field in sorted(set(parent_spec) | set(current_spec))
+                    if field not in excluded_fields
+                    and parent_spec.get(field) != current_spec.get(field)
+                ]
+                commit_pair = (parent["git_commit"], experiment["git_commit"])
+                if commit_pair not in git_cache:
+                    git_cache[commit_pair] = self._git_change_summary(*commit_pair)
+                git_change_count, git_changes = git_cache[commit_pair]
+            nodes.append(
+                {
+                    "id": experiment_id,
+                    "title": experiment["title"],
+                    "parent_experiment_id": parent_id,
+                    "parent_title": parent_title,
+                    "status": experiment["status"],
+                    "withdrawn": bool(experiment["withdrawn"]),
+                    "evidence_health": experiment["evidence_health"],
+                    "note": experiment["note"],
+                    "change_summary": change_summaries.get(experiment_id),
+                    "git_commit": experiment["git_commit"],
+                    "created_at": experiment["created_at"],
+                    "score": score["value"] if score else None,
+                    "score_source": score["source"] if score else None,
+                    "parent_delta": (
+                        score["value"] - parent_score["value"]
+                        if score is not None and parent_score is not None
+                        else None
+                    ),
+                    "spec_changes": spec_changes,
+                    "git_change_count": git_change_count,
+                    "git_changes": git_changes,
+                }
+            )
+        return {
+            "comparison_key": key,
+            "primary_metric": policy.primary_metric,
+            "nodes": nodes,
+        }
+
+    def _git_change_summary(
+        self, parent_commit: str, current_commit: str
+    ) -> tuple[int, list[dict[str, str]]]:
+        if parent_commit == current_commit:
+            return 0, []
+        result = repository_git(
+            self.settings.project_root,
+            "diff",
+            "--name-status",
+            "-z",
+            parent_commit,
+            current_commit,
+            "--",
+            check=False,
+        )
+        if result.returncode != 0:
+            return 0, []
+        tokens = result.stdout.split("\0")
+        changes: list[dict[str, str]] = []
+        index = 0
+        while index < len(tokens) and tokens[index]:
+            status = tokens[index]
+            index += 1
+            if index >= len(tokens) or not tokens[index]:
+                break
+            if status.startswith(("R", "C")):
+                if index + 1 >= len(tokens) or not tokens[index + 1]:
+                    break
+                changes.append(
+                    {
+                        "status": status,
+                        "old_path": tokens[index],
+                        "path": tokens[index + 1],
+                    }
+                )
+                index += 2
+            else:
+                changes.append({"status": status, "path": tokens[index]})
+                index += 1
+        return len(changes), changes[:60]
+
     def leaderboard(self, comparison_key: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT l.*, e.title, e.git_commit, e.parent_experiment_id,
@@ -1471,12 +1815,14 @@ class VeriLabService:
                 )
             }
         ranks: dict[str, int] = {}
+        change_summaries = self._change_summary_records()
         for row in rows:
             key = row["comparison_key"]
             ranks[key] = ranks.get(key, 0) + 1
             row["rank"] = ranks[key]
             parent_score = scores.get(row["parent_experiment_id"])
             row["parent_delta"] = row["score"] - parent_score if parent_score is not None else None
+            row["change_summary"] = change_summaries.get(row["experiment_id"])
             row["duration_seconds"] = None
             if row["started_at"] and row["finished_at"]:
                 row["duration_seconds"] = (

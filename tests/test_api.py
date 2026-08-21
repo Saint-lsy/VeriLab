@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from verilab.api import create_app
 from verilab.codex_driver import CodexResult
 
-from .conftest import make_spec
+from .conftest import commit_all, make_spec
 
 
 def _event_ids(body: str) -> list[int]:
@@ -135,6 +135,68 @@ def test_web_language_switch_is_persistent_and_covers_structured_views(
         assert unsupported.status_code == 404
 
 
+def test_lineage_api_and_dashboard_compare_parent_and_child(
+    project: Path, service_factory
+) -> None:
+    service = service_factory()
+    parent = service.submit(make_spec(project, title="Lineage parent"))
+    service.run_next()
+
+    (project / "candidate.txt").write_text("new candidate behavior\n", encoding="utf-8")
+    commit_all(project, "derive lineage candidate")
+    child_spec = make_spec(
+        project,
+        title="Lineage child",
+        parent_experiment_id=parent["experiment_id"],
+    ).model_copy(update={"metadata": {"test": True, "factor": "augmentation"}})
+    child = service.submit(child_spec)
+
+    app = create_app(service, settings=service.settings, start_worker=False)
+    with TestClient(app) as client:
+        response = client.get("/api/lineage")
+        assert response.status_code == 200
+        lineage = response.json()
+        assert lineage["primary_metric"] == "accuracy"
+        assert len(lineage["nodes"]) == 2
+        nodes = {node["id"]: node for node in lineage["nodes"]}
+        parent_node = nodes[parent["experiment_id"]]
+        child_node = nodes[child["experiment_id"]]
+        assert parent_node["score"] == 0.75
+        assert parent_node["score_source"] == "verified"
+        assert parent_node["withdrawn"] is False
+        assert parent_node["evidence_health"] == "healthy"
+        assert parent_node["change_summary"]["source"] == "independent_reviewer"
+        assert child_node["parent_experiment_id"] == parent["experiment_id"]
+        assert child_node["parent_title"] == "Lineage parent"
+        assert child_node["score"] is None
+        assert child_node["change_summary"] is None
+        assert {change["field"] for change in child_node["spec_changes"]} == {"metadata"}
+        assert child_node["git_change_count"] == 1
+        assert child_node["git_changes"] == [{"status": "A", "path": "candidate.txt"}]
+
+        dashboard = client.get("/")
+        assert dashboard.status_code == 200
+        assert "Experiment lineage" in dashboard.text
+        assert "Lineage parent" in dashboard.text
+        assert "Lineage child" in dashboard.text
+        assert "Deterministic candidate compared with its declared parent" in dashboard.text
+        assert 'id="experiment-lineage"' in dashboard.text
+        assert 'id="lineage-fallback"' in dashboard.text
+        assert "verilab.js?v=20260819-narrative1" in dashboard.text
+
+        client.get("/language/zh?next=/", follow_redirects=False)
+        translated = client.get("/")
+        assert "实验谱系图" in translated.text
+        assert "查看它与声明的父实验之间有哪些变化" in translated.text
+
+        missing = client.get("/api/lineage?comparison_key=missing-key")
+        assert missing.json() == {
+            "comparison_key": "missing-key",
+            "primary_metric": None,
+            "nodes": [],
+        }
+
+
 def test_review_bundle_contains_auditable_contract(project: Path, service_factory) -> None:
     service = service_factory()
     submitted = service.submit(make_spec(project, title="Bundle contract"))
@@ -144,6 +206,7 @@ def test_review_bundle_contains_auditable_contract(project: Path, service_factor
         "experiment.json",
         "run.json",
         "policy.public.json",
+        "change-context.json",
         "artifacts.json",
         "metrics.json",
         "events.jsonl",
@@ -156,6 +219,11 @@ def test_review_bundle_contains_auditable_contract(project: Path, service_factor
     assert manifest["target_bundle_sha256"] == (directory / "bundle.sha256").read_text().strip()
     policy = json.loads((directory / "policy.public.json").read_text(encoding="utf-8"))
     assert policy["grader_command"] == ["[controller-private]"]
+    change_context = json.loads(
+        (directory / "change-context.json").read_text(encoding="utf-8")
+    )
+    assert change_context["current"]["title"] == "Bundle contract"
+    assert change_context["parent"] is None
 
 
 def test_dummy_conversation_to_verified_bundle(project: Path, service_factory) -> None:

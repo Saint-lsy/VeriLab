@@ -84,6 +84,21 @@ class FakeReviewer:
                     for name in names
                 ],
                 "summary": "deterministic independent test review",
+                "change_summary": {
+                    "headline": "Deterministic candidate compared with its declared parent",
+                    "summary": (
+                        "The candidate keeps the test protocol fixed and records its declared "
+                        "configuration as a human-readable audit statement."
+                    ),
+                    "key_changes": [
+                        "The frozen experiment specification identifies the candidate."
+                    ],
+                    "expected_effect": (
+                        "The declared change is expected to preserve reproducibility."
+                    ),
+                    "observed_effect": "The trusted grader computed the recorded test metric.",
+                    "evidence_refs": [reference],
+                },
             }
         )
         return output, f"fake-thread-{self.calls}"

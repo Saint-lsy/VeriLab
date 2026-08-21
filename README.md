@@ -1,5 +1,7 @@
 # VeriLab v1
 
+English | [简体中文](README.zh-CN.md)
+
 VeriLab is a deliberately narrow, local-first experiment controller: a Codex Executor may propose
 and submit immutable experiments, but only the Controller may issue a formal run ticket, only the
 trusted grader may compute an authoritative metric, and only a fresh read-only Reviewer may admit
@@ -8,7 +10,8 @@ that metric to a comparison-key leaderboard.
 ```text
 browser chat → Executor Codex → frozen ExperimentSpec → detached Git worktree
              → supervised process → sealed artifacts → trusted grader
-             → fresh read-only Reviewer → verified leaderboard
+             → fresh read-only Reviewer → human-readable change summary
+             → verified leaderboard
 ```
 
 The trust level is **recomputable evidence**, not hostile-root isolation. VeriLab prevents an
@@ -33,12 +36,15 @@ labels, or kernel compromise.
 - Independent metric provenance (`reported`, `computed`, `verified`). The leaderboard reads only
   `verified`; a reported/computed primary-metric mismatch fails verification.
 - Fresh Reviewer thread per attempt, read-only Codex sandbox, JSON Schema output, exact bundle hash,
-  eight mandatory checks, and validated `event:<seq>` / `sha256:<digest>` references.
+  eight mandatory checks, and validated `event:<seq>` / `sha256:<digest>` references. The Reviewer
+  must also explain the scientific changes, expected effect, and observed result in plain language;
+  a missing or unsupported narrative blocks leaderboard admission.
 - SQLite canonical append-only SHA256 event chain with update/delete triggers. Status and leaderboard
   tables are projections; `verilab audit verify` recomputes the chain, reconstructs and compares
   projections, validates policy snapshots, and checks artifact health.
-- FastAPI/Jinja local web UI, structured experiment timeline, audit inbox, SSE replay using
-  `Last-Event-ID`, downloadable audit bundles, CSRF checks, and a narrow capability-authenticated CLI.
+- FastAPI/Jinja local web UI, interactive parent-to-child experiment lineage with spec/Git diffs,
+  structured experiment timeline, audit inbox, SSE replay using `Last-Event-ID`, downloadable audit
+  bundles, CSRF checks, and a narrow capability-authenticated CLI.
 
 No CORAL or Argus package is imported at runtime.
 
@@ -127,6 +133,17 @@ The strict grader result is:
   "metrics": {"accuracy": 0.75}
 }
 ```
+
+For legacy accepted experiments that predate the narrative gate, an administrator may append a
+clearly labeled historical explanation without rewriting the original review or score:
+
+```bash
+verilab summary import summaries.json \
+  --project-root /path/to/experiment-project \
+  --state-dir /path/to/controller-state
+```
+
+This command refuses to replace an existing canonical summary.
 
 ## State and audit
 

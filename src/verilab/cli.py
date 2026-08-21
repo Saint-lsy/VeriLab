@@ -13,7 +13,7 @@ import uvicorn
 
 from .api import create_app
 from .config import Settings
-from .models import ExperimentSpec, ProjectPolicy
+from .models import ChangeSummary, ExperimentSpec, ProjectPolicy
 from .repository import pin_policy_code
 from .service import VeriLabService
 
@@ -138,6 +138,24 @@ def cmd_audit_verify(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def cmd_summary_import(args: argparse.Namespace) -> int:
+    settings = Settings.load(project_root=args.project_root, state_dir=args.state_dir)
+    service = VeriLabService(settings)
+    value = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if value.get("schema_version") != 1 or not isinstance(value.get("summaries"), list):
+        raise SystemExit("summary import must contain schema_version 1 and a summaries list")
+    imported = []
+    for item in value["summaries"]:
+        imported.append(
+            service.record_historical_change_summary(
+                str(item["experiment_id"]),
+                ChangeSummary.model_validate(item["change_summary"]),
+            )
+        )
+    print(json.dumps({"imported": imported}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = Settings.load(project_root=args.project_root, state_dir=args.state_dir)
     app = create_app(settings=settings)
@@ -188,6 +206,14 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--project-root", required=True)
     verify.add_argument("--state-dir", required=True)
     verify.set_defaults(func=cmd_audit_verify)
+
+    summary = sub.add_parser("summary", help="human-readable experiment change summaries")
+    summary_sub = summary.add_subparsers(dest="summary_command", required=True)
+    summary_import = summary_sub.add_parser("import", help="append historical summaries")
+    summary_import.add_argument("input")
+    summary_import.add_argument("--project-root", required=True)
+    summary_import.add_argument("--state-dir", required=True)
+    summary_import.set_defaults(func=cmd_summary_import)
 
     serve = sub.add_parser("serve", help="start the local Controller and web UI")
     serve.add_argument("--project-root", required=True)

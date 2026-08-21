@@ -20,6 +20,7 @@ class AuditBundle:
         experiment: dict[str, Any],
         run: dict[str, Any],
         policy: dict[str, Any],
+        change_context: dict[str, Any],
         artifacts: list[dict[str, Any]],
         metrics: list[dict[str, Any]],
         events: list[dict[str, Any]],
@@ -29,6 +30,7 @@ class AuditBundle:
             "experiment.json": experiment,
             "run.json": run,
             "policy.public.json": policy,
+            "change-context.json": change_context,
             "artifacts.json": {"schema_version": 1, "artifacts": artifacts},
             "metrics.json": {"schema_version": 1, "metrics": metrics},
         }
@@ -109,4 +111,13 @@ reference in events.jsonl or sha256:<digest> from bundle-manifest.json/artifacts
 unknown when evidence is insufficient and never infer missing evidence. Verdict eligible requires
 all eight checks to pass; use ineligible for a demonstrated failure and needs_human only for an
 issue that cannot be decided from this read-only bundle.
+
+Before an eligible result can enter the leaderboard, also write change_summary as a concise,
+human-readable Simplified Chinese explanation grounded in change-context.json. Explain what changed
+relative to the declared parent, why the change was expected to help, and what the trusted metric
+actually showed. Call a change an improvement only when the observed evidence supports that claim;
+state regressions and inconclusive results plainly. For a root experiment, describe it as the
+baseline rather than inventing a parent comparison. Keep key_changes focused on scientific choices,
+not raw file lists. Every change_summary.evidence_refs item must use an allowed event or SHA256
+reference from the bundle.
 """
